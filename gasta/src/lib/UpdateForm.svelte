@@ -1,21 +1,18 @@
 <script lang="ts">
-	import { Icon } from 'svelte-awesome';
-	import calendar from 'svelte-awesome/icons/calendar';
-	import tv from 'svelte-awesome/icons/tv';
-
 	import { form_action } from '$lib/form_action';
 	import { enhance } from '$app/forms';
 	import lodash from 'lodash';
 	import type { Playlist } from '$lib/api_bindings/read/Playlist';
 	import type { Display } from '$lib/api_bindings/read/Display';
 	import type { Schedule } from '$lib/api_bindings/read/Schedule';
-	import { getModalStore } from '@skeletonlabs/skeleton';
 	import type { DisplayState, ScheduleState, State } from '../app';
-
-	export let uuid: string;
-	export let type: State;
-	export let item: Display | Schedule | Playlist | undefined;
-	export let update_enabled: boolean = true;
+	import * as Card from '$lib/components/ui/card';
+	import { Button, buttonVariants } from './components/ui/button';
+	import * as AlertDialog from '$lib/components/ui/alert-dialog';
+	import type { Snippet } from 'svelte';
+	import { watch } from 'runed';
+	import { Badge } from './components/ui/badge';
+	import { CalendarClock, ListVideo, Monitor } from '@lucide/svelte';
 
 	type DisplayType = { type: 'Display'; content: Display };
 	type ScheduleType = { type: 'Schedule'; content: Schedule };
@@ -25,17 +22,36 @@
 	type Dependant = Exclude<Types, PlaylistType>;
 	type HasDependencies = Exclude<Types, DisplayType>;
 
-	/** Map with entries where current type could have an item depending on it; for example a Schedule that may depend on the current Playlist */
-	export let dependant_state: { displays: DisplayState; schedules: ScheduleState } | null = null;
+	let {
+		uuid = $bindable(),
+		type = $bindable(),
+		item = $bindable(undefined),
+		bind_update_enabled = $bindable(),
+		update_enabled = $bindable(true),
+		dependant_state = null,
+		children
+	}: {
+		uuid: string;
+		type: State;
+		item: Display | Schedule | Playlist | undefined;
+		bind_update_enabled?: boolean;
+		/** If update is allowed to be activated */
+		update_enabled?: boolean;
+		/** Map with entries where current type could have an item depending on it; for example a Schedule that may depend on the current Playlist */
+		dependant_state?: { displays: DisplayState; schedules: ScheduleState } | null;
+		children: Snippet<[]>;
+	} = $props();
 
-	$: map = type.content;
+	const map = $derived(type?.content);
 	// State is cloned from last committed value for
 	// changes to live independently from database
-	$: item = structuredClone(map.get(uuid));
+	$effect(() => {
+		if (map && uuid) {
+			item = structuredClone(map.get(uuid));
+		}
+	});
 
-	const modalStore = getModalStore();
-
-	let delete_button: HTMLButtonElement;
+	let delete_button: HTMLButtonElement | undefined = $state();
 
 	const test = ({ content, type }: HasDependencies): Dependant[] => {
 		if (dependant_state) {
@@ -72,39 +88,61 @@
 	};
 
 	// TODO: Change type to object with two fields: schedules and displays?
-	let dependents: Dependant[] | null = null;
-	$: {
-		if (type.type === 'Schedule') {
+	let dependents: Dependant[] | null = $state(null);
+	$effect(() => {
+		if (type?.type === 'Schedule') {
 			dependents = test({ type: 'Schedule', content: item as Schedule });
-		} else if (type.type === 'Playlist') {
+		} else if (type?.type === 'Playlist') {
 			dependents = test({ type: 'Playlist', content: item as Playlist });
 		}
-	}
+	});
+
+	watch(
+		() => disabled,
+		() => {
+			bind_update_enabled = !disabled;
+		}
+	);
+
+	let disabled = $derived((map && uuid && lodash.isEqual(item, map.get(uuid))) || !update_enabled);
 </script>
 
 <!--  Give fields linked to id of uuid to highlight how they are dependant on link -->
 {#if dependant_state && dependents}
-	<div class="card m-4 p-4">
-		<div class="flex overflow-scroll hide-scrollbar gap-2">
-			{#if dependents.length < 1}
-				<i class="text-surface-300">No dependents... :(</i>
-			{/if}
-			{#each dependents as { content: { name, uuid }, type } (name + uuid)}
-				<a href={`/${type.toLowerCase()}/${uuid}`}>
-					<span class="chip variant-ghost-primary gap-1"
-						><Icon data={type === 'Display' ? tv : calendar}></Icon> &nbsp;{name}</span
-					>
-				</a>
-			{/each}
-		</div>
-	</div>
+	<Card.Root class="relative w-full max-w-7xl mb-4 py-4 px-0">
+		<Card.Content class="overflow-x-auto">
+			<div class="flex overflow-x-auto hide-scrollbar gap-2">
+				{#if !dependents.length}
+					<i class="text-foreground/60">No dependents... :(</i>
+				{:else}
+					<p class="mr-2">In use by</p>
+				{/if}
+				{#each dependents as { content: { name, uuid }, type } (name + uuid)}
+					<a href={`/${type.toLowerCase()}/${uuid}`}>
+						<Badge>
+							{#if type === 'Display'}
+								<Monitor />
+							{:else}
+								<CalendarClock />
+							{/if}
+							&nbsp;{name}
+						</Badge>
+					</a>
+				{/each}
+			</div>
+		</Card.Content>
+	</Card.Root>
 {/if}
 
 {#if item}
 	<form
-		class="card m-4"
 		method="POST"
+		class="w-full max-w-7xl"
 		use:enhance={({ formData }) => {
+			if (!item) {
+				console.error("Cannot submit form: 'item' is undefined.");
+				return () => {};
+			}
 			// Ignore how forms work and send a stringified JSON of state to server route
 			// A clear function on formData would have simplified things...
 			[...formData.keys()].forEach((k) => formData.delete(k));
@@ -124,31 +162,35 @@
 			return form_action;
 		}}
 	>
-		<section class="p-4">
-			<slot />
+		{@render children?.()}
+		<div class="flex w-full gap-2 mt-8">
+			<Button {disabled} type="submit" formaction="?/update">Update</Button>
 
-			<div class="flex w-full justify-center gap-4 mt-5">
-				<button
-					type="button"
-					class="btn variant-ringed-error"
-					on:click={() =>
-						modalStore.trigger({
-							type: 'confirm',
-							title: `Delete '${item.name}'?`,
-							body: `Are your sure you want to delete ${type.type} '${item.name}'?`,
-							response: (r) => (r ? delete_button.click() : '')
-						})}>Delete</button
-				>
+			<AlertDialog.Root>
+				<AlertDialog.Trigger type="button" class={buttonVariants({ variant: 'outline' })}>
+					Delete
+				</AlertDialog.Trigger>
+				<AlertDialog.Content>
+					<AlertDialog.Header>
+						<AlertDialog.Title>Delete '{item.name}'?</AlertDialog.Title>
+						<AlertDialog.Description>
+							Are your sure you want to delete {type?.type} '{item.name}'?
+						</AlertDialog.Description>
+					</AlertDialog.Header>
+					<AlertDialog.Footer>
+						<AlertDialog.Cancel>Cancel</AlertDialog.Cancel>
+						<AlertDialog.Action
+							class={buttonVariants({ variant: 'destructive' })}
+							onclick={() => delete_button?.click()}
+						>
+							Delete
+						</AlertDialog.Action>
+					</AlertDialog.Footer>
+				</AlertDialog.Content>
+			</AlertDialog.Root>
+		</div>
 
-				<button
-					class="btn variant-filled-primary"
-					disabled={lodash.isEqual(item, map.get(uuid)) || !update_enabled}
-					formaction="?/update">Apply</button
-				>
-			</div>
-
-			<!-- svelte-ignore a11y_consider_explicit_label -->
-			<button class="hidden" formaction="?/delete" bind:this={delete_button}></button>
-		</section>
+		<!-- svelte-ignore a11y_consider_explicit_label -->
+		<button class="hidden" formaction="?/delete" bind:this={delete_button}></button>
 	</form>
 {/if}
