@@ -19,7 +19,7 @@
 	import cron from 'cron-validate';
 	import { Badge } from '$lib/components/ui/badge';
 	import { cn } from '$lib/utils';
-	import * as Card from '$lib/components/ui/card';
+	import { Skeleton } from '$lib/components/ui/skeleton';
 
 	let { data }: { data: PageData } = $props();
 
@@ -97,7 +97,7 @@
 		const MAX_TIMEOUT = 2147483647;
 
 		while (true) {
-			let sleep: number = (schedule_info.next?.in_ms as any as number) ?? 99999999;
+			let sleep: number = ((await schedule_info).next?.in_ms as any as number) ?? 99999999;
 			if (sleep > MAX_TIMEOUT) {
 				// console.warn(`Sleep duration ${sleep}ms exceeds max. Capping at ${MAX_TIMEOUT}ms.`);
 				sleep = MAX_TIMEOUT;
@@ -109,7 +109,7 @@
 			} catch {}
 
 			try {
-				schedule_info = await (await fetch(`/schedule/${data.uuid}`)).json();
+				schedule_info = fetch(`/schedule/${data.uuid}`).then((response) => response.json());
 			} catch (e) {
 				console.error(e);
 			}
@@ -155,14 +155,18 @@
 </script>
 
 {#snippet DataTableActive({ item }: { item: { id: string; playlist: string } })}
-	<Badge
-		class={[
-			'rounded-md h-5 w-5 align-middle transition-colors',
-			!bind_update_enabled && schedule_info.current === item.playlist && 'bg-primary',
-			!bind_update_enabled && schedule_info?.next?.playlist === item.playlist && 'bg-primary/20'
-		]}
-		variant="outline"
-	></Badge>
+	{#await schedule_info}
+		<Skeleton class="h-5 w-5" />
+	{:then schedule_info}
+		<Badge
+			class={[
+				'rounded-md h-5 w-5 align-middle transition-colors',
+				!bind_update_enabled && schedule_info.current === item.playlist && 'bg-primary',
+				!bind_update_enabled && schedule_info?.next?.playlist === item.playlist && 'bg-primary/20'
+			]}
+			variant="outline"
+		></Badge>
+	{/await}
 {/snippet}
 
 {#snippet DataTablePlaylist({ item }: { item: ScheduledPlaylistInput })}
@@ -282,24 +286,28 @@
 		</DndTable>
 
 		<div class="mt-4">
-			{#if schedule_info.next}
-				{@const next_playlist = data.playlist.content.get(schedule_info.next.playlist)}
-				{@const change_date = new Date(Date.now() + (schedule_info.next.in_ms as any as number))}
-				{#if next_playlist}
-					Will change to
-					<a href={`/playlist/${next_playlist.uuid}`}>
-						<Badge>
-							<ListVideo />
-							&nbsp;{next_playlist.name}
-						</Badge>
-					</a>
-					at {change_date.toLocaleString()}
+			{#await schedule_info}
+				<Skeleton class="h-4 w-[250px]" />
+			{:then schedule_info}
+				{#if schedule_info.next}
+					{@const next_playlist = data.playlist.content.get(schedule_info.next.playlist)}
+					{@const change_date = new Date(Date.now() + (schedule_info.next.in_ms as any as number))}
+					{#if next_playlist}
+						Will change to
+						<a href={`/playlist/${next_playlist.uuid}`}>
+							<Badge>
+								<ListVideo />
+								&nbsp;{next_playlist.name}
+							</Badge>
+						</a>
+						at {change_date.toLocaleString()}
+					{:else}
+						Playlist {schedule_info.next.playlist} does not exist :(
+					{/if}
 				{:else}
-					Playlist {schedule_info.next.playlist} does not exist :(
+					<i class="text-foreground/60">No playlist change is scheduled</i>
 				{/if}
-			{:else}
-				<i class="text-foreground/60">No playlist change is scheduled</i>
-			{/if}
+			{/await}
 		</div>
 	{/if}
 </UpdateForm>

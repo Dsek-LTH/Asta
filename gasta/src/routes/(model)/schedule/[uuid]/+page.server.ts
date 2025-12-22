@@ -7,11 +7,10 @@ import type { PageServerLoad } from './$types';
 
 const type = 'Schedule';
 
-export const load: PageServerLoad = async ({ params }) => {
-	// TODO: await on client instead?
-	const schedule_info: ScheduleInfo = await (
-		await fetch(`${env.SERVER_URL}/api/${type.toLocaleLowerCase()}/${params.uuid}`)
-	).json();
+export const load: PageServerLoad = ({ params }) => {
+	const schedule_info: Promise<ScheduleInfo> = fetch(
+		`${env.SERVER_URL}/api/${type.toLocaleLowerCase()}/${params.uuid}`
+	).then((response) => response.json());
 
 	return {
 		schedule_info,
