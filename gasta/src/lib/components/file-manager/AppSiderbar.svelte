@@ -10,6 +10,14 @@
 		currentPath: string;
 		refreshManager: () => Promise<void>;
 	};
+
+	function debounce<T extends (...args: any[]) => void>(fn: T, ms: number) {
+		let timer: ReturnType<typeof setTimeout>;
+		return (...args: Parameters<T>) => {
+			clearTimeout(timer);
+			timer = setTimeout(() => fn(...args), ms);
+		};
+	}
 </script>
 
 <script lang="ts">
@@ -32,6 +40,7 @@
 	import { toast } from 'svelte-sonner';
 	import { Separator } from '$lib/components/ui/separator';
 	import { Input } from '$lib/components/ui/input';
+	import { CurrentPathType } from './types';
 
 	let { uploadFormSnippet }: { uploadFormSnippet?: Snippet<[FormContext]> } = $props();
 
@@ -40,17 +49,40 @@
 
 	const fm = useFileManager();
 
-	let searchQuery = $state('');
+	let localSearchQuery = $state(fm.searchQuery);
 
-	let lastDirectory = $state(fm.root);
-	watch(
-		() => searchQuery,
-		() => {
-			if (searchQuery) {
-				lastDirectory = fm.currentDirectory;
-				fm.navigateSearch(searchQuery);
+	let lastPath = $state<
+		| {
+				type: CurrentPathType.Recent;
+		  }
+		| {
+				type: CurrentPathType.Path;
+				path: string;
+		  }
+	>();
+	const executeSearch = debounce((query: string) => {
+		if (query) {
+			if (fm.currentPath.type !== CurrentPathType.Search) {
+				lastPath = fm.currentPath;
+			}
+			fm.navigateSearch(query);
+		} else if (fm.currentPath.type === CurrentPathType.Search) {
+			if (lastPath) {
+				lastPath.type === CurrentPathType.Path ? fm.navigate(lastPath.path) : fm.navigateRecent();
 			} else {
-				fm.navigate(lastDirectory);
+				fm.navigate(fm.root);
+			}
+		}
+	}, 250);
+
+	// Sync search field with url parameters
+	watch(
+		() => fm.currentPath.type,
+		() => {
+			if (fm.currentPath.type !== CurrentPathType.Search) {
+				localSearchQuery = '';
+			} else {
+				localSearchQuery = fm.searchQuery;
 			}
 		}
 	);
@@ -207,7 +239,12 @@
 				<div class="relative py-1">
 					<Label for="search" class="sr-only">Search</Label>
 					<InputGroup.Root>
-						<InputGroup.Input type="search" placeholder="Search..." bind:value={searchQuery} />
+						<InputGroup.Input
+							type="search"
+							placeholder="Search..."
+							bind:value={localSearchQuery}
+							oninput={() => executeSearch(localSearchQuery)}
+						/>
 						<InputGroup.Addon>
 							<Search />
 						</InputGroup.Addon>
@@ -231,7 +268,8 @@
 									bindFileInput,
 									setLoading,
 									resetFiles,
-									currentPath: fm.currentPath.type === 'Path' ? fm.currentPath.path : '/',
+									currentPath:
+										fm.currentPath.type === CurrentPathType.Path ? fm.currentPath.path : '/',
 									refreshManager: async () => await fm.refresh()
 								})}
 							{/if}
@@ -278,7 +316,7 @@
 					<h4 class="my-2 rounded-md px-4 text-xs text-muted-foreground">Quick Access</h4>
 					<div class="grid gap-1">
 						<Button
-							variant={fm.currentPath.type === 'Path' && fm.currentPath.path === '/'
+							variant={fm.currentPath.type === CurrentPathType.Path && fm.currentPath.path === '/'
 								? 'secondary'
 								: 'ghost'}
 							class="w-full justify-start h-8"
@@ -288,7 +326,7 @@
 							Home
 						</Button>
 						<Button
-							variant={fm.currentPath.type === 'Recent' ? 'secondary' : 'ghost'}
+							variant={fm.currentPath.type === CurrentPathType.Recent ? 'secondary' : 'ghost'}
 							class="w-full justify-start h-8"
 							onclick={() => fm.navigateRecent()}
 						>
@@ -302,7 +340,9 @@
 				<div class="mt-4">
 					<h4 class="mb-1 rounded-md px-4 text-xs text-muted-foreground">Filesystem</h4>
 					<div class="grid gap-1">
-						<TreeView.Root selectedId={fm.currentPath.type === 'Path' ? fm.currentPath.path : ''}>
+						<TreeView.Root
+							selectedId={fm.currentPath.type === CurrentPathType.Path ? fm.currentPath.path : ''}
+						>
 							{#each fm.root.directories ?? [] as child}
 								{@render recursiveNode(child)}
 							{/each}

@@ -1,6 +1,6 @@
 # DOES NOT WORK
 
-FROM docker.io/node:slim
+FROM node:slim
 
 WORKDIR /usr/scr/app
 COPY . /usr/scr/app
